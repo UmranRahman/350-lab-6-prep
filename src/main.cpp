@@ -2,6 +2,7 @@
 
 #include "waldo_data.h"
 #include "zoom.h"
+#include <algorithm>
 
 ZoomApp::ZoomApp(float maxWorldWidth, float maxWorldHeight) : mIsZooming(false) {
     // Load the Waldo image and determine the world size (mWorldSize)
@@ -91,6 +92,25 @@ void ZoomApp::updateViewAfterResize() {
     // Calculate newViewport based on aspect ratios of window and of mWorldSize. Then:
     // mWorldViewDefault.setViewport(newViewport);
     // mWorldViewZoomed.setViewport(newViewport);
+
+
+    // AI-assisted: structure and formulas from Claude (prompt #2). Verified by hand
+    // trace: 800x600 world in 1200x600 window -> viewport (0.167, 0, 0.667, 1).
+    auto windowSize = mWindow.getSize();
+    float winW = static_cast<float>(windowSize.x);
+    float winH = static_cast<float>(windowSize.y);
+
+    float scale = std::min(winW/mWorldSize.x, winH/mWorldSize.y);
+
+    float vpWidth = (mWorldSize.x * scale) / winW;
+    float vpHeight = (mWorldSize.y * scale) / winH;
+
+    float vpLeft = (1.f - vpWidth)/2.f;
+    float vpTop = (1.f - vpHeight)/2.f;
+
+    sf::FloatRect newViewport ({vpLeft, vpTop}, {vpWidth, vpHeight});
+    mWorldViewDefault.setViewport(newViewport);
+    mWorldViewZoomed.setViewport(newViewport);
 }
 
 // updateZoomView sets the center of mWorldViewZoomed such that the zoomed view would have the
@@ -110,14 +130,50 @@ void ZoomApp::updateZoomView(sf::Vector2i mousePos) {
     //  HINT: Determine the steps to go from the desired center to the top-left of this new
     //        world-space rectangle, then from this top-left to the thing you're pointing at,
     //        using our above computed vars. Then solve the equation for the desired center.
+
+// AI-assisted (Claude). Prompts: "teach me the zoom math", "show code examples",
+// "help me fix updateZoomView, still not getting it".
+// AI explained the progress-bar idea (pixels -> fraction -> world units -> top-left -> center)
+// and corrected my bugs (pixel conversion for the viewport, empty percent lines, '*' vs '+').
+// I traced it by hand with a 1200x600 window and mouse at (500,150): center = (325, 187.5).
+    
+    auto windowSize = mWindow.getSize();
+    sf::FloatRect vp = mWorldViewDefault.getViewport();
+
+    // Viewport (the picture's area) measured in pixels
+    float vpLeftPx  = vp.position.x * windowSize.x;
+    float vpTopPx   = vp.position.y * windowSize.y;
+    float vpWidthPx = vp.size.x * windowSize.x;
+    float vpHeightPx = vp.size.y * windowSize.y;
+
+    // (1) Mouse position inside the viewport, in pixels
+    float mouseInputVpX = mousePos.x - vpLeftPx;
+    float mouseInputVpY = mousePos.y - vpTopPx;
+
+    // (2) As a fraction (0 to 1) of the viewport
+    float percentX = mouseInputVpX / vpWidthPx;
+    float percentY = mouseInputVpY / vpHeightPx;
+
+    // (3) That spot in world units
+    float worldX = percentX * mWorldSize.x;
+    float worldY = percentY * mWorldSize.y;
+
+    // (4) Zoomed rectangle: put the cursor at the same fraction across it
+    sf::Vector2f zoomedSize = mWorldSize / ZOOM_FACTOR;
+    float topLeftX = worldX - percentX * zoomedSize.x;
+    float topLeftY = worldY - percentY * zoomedSize.y;
+
+    mWorldViewZoomed.setCenter({topLeftX + zoomedSize.x / 2.f,topLeftY + zoomedSize.y / 2.f});
 }
 
 void ZoomApp::render() {
     mWindow.clear(sf::Color::Black);
     if (!mIsZooming) {
         // TODO: If the user is not zooming in, use the default world view.
+        mWindow.setView(mWorldViewDefault);
     } else {
         // TODO: If the user is zooming in, use the zoomed world view.
+        mWindow.setView(mWorldViewZoomed);
     }
     mWindow.draw(*mWaldoSprite);
     mWindow.display();
